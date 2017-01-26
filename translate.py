@@ -14,25 +14,26 @@ from seq2seq import Seq2Seq
 
 criterion = nn.NLLLoss()
 
-def get_batch(data, encoder_size, decoder_size, batch_size):
+def get_batch(data, encoder_size, decoder_size, batch_size, reverse_input=False):
     encoder_inputs = []
     decoder_inputs = []
     for _ in xrange(batch_size):
         encoder_input, decoder_input = random.choice(data)
+        encoder_input += [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
         encoder_inputs.append(encoder_input)
+        decoder_input = [data_utils.GO_ID] + decoder_input + [data_utils.PAD_ID] * (decoder_size - len(decoder_input) - 1)
         decoder_inputs.append(decoder_input)
 
     batch_encoder_inputs = []
     for time in xrange(encoder_size):
-        batch_encoder_inputs.append([encoder_inputs[batch_idx][time] \
-            if time < len(encoder_inputs[batch_idx]) else data_utils.PAD_ID \
-            for batch_idx in xrange(batch_size)])
+        seq = [encoder_inputs[batch_idx][time] for batch_idx in xrange(batch_size)]
+        if reverse_input:
+            seq.reverse()
+        batch_encoder_inputs.append(seq)
 
-    batch_decoder_inputs = [[data_utils.GO_ID] * batch_size]
+    batch_decoder_inputs = []
     for time in xrange(decoder_size):
-        seq = [decoder_inputs[batch_idx][time] \
-            if time < len(decoder_inputs[batch_idx]) else data_utils.PAD_ID \
-            for batch_idx in xrange(batch_size)]
+        seq = [decoder_inputs[batch_idx][time] for batch_idx in xrange(batch_size)]
         batch_decoder_inputs.append(seq)
 
     batch_weight = torch.ones(batch_size)
@@ -52,21 +53,29 @@ def evaluate(model, dev):
     return total_loss[0] / len(dev)
 
 if __name__ == '__main__':
+    attention = False
+    dropout_p = 0
     batch_size = 20
     encode_ntoken = 20
     decode_ntoken = 20
-    encode_max_len = 10
-    decode_max_len = 10
-    embedding_size = 10
-    hidden_size = 10
+    encode_max_len = 20
+    decode_max_len = 20
+    embedding_size = 16
+    hidden_size = 16
     init_range = 0.08
     step_per_epoch = 50
+    learning_rate = 0.1
+    learning_rate_decay = 0.9
+    momentum=0.9
     data_path = "./data"
+
+    checkpoint_after = 50
 
     train, dev, test = data_utils.prepare_data(data_path, encode_ntoken, decode_ntoken, recreate=False)
     model = Seq2Seq(encode_ntoken, decode_ntoken,
             embedding_size, hidden_size,
-            batch_size)
+            encode_max_len, decode_max_len,
+            batch_size, attention=attention, dropout_p=dropout_p)
 
     model_path = "model.dat"
     if os.path.exists(model_path):
@@ -76,10 +85,14 @@ if __name__ == '__main__':
         if torch.cuda.is_available():
             model.cuda()
         model.init_weights(init_range)
-        optimizer = optim.SGD(model.parameters(), lr = 0.1, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr = learning_rate, momentum=momentum)
 
         train_loss = 0
-        for step in xrange(2500):
+        last_train_loss = 10
+        loss_count = 0
+        best_dev_loss = 10
+        step = 0
+        while True:
             batch_enc_inputs, batch_dec_inputs, batch_weights = get_batch(train, encode_max_len, decode_max_len, batch_size)
             if torch.cuda.is_available():
                 batch_enc_inputs, batch_dec_inputs = batch_enc_inputs.cuda(), batch_dec_inputs.cuda()
@@ -100,14 +113,27 @@ if __name__ == '__main__':
             train_loss += total_loss
 
             if step % step_per_epoch == 0:
+                epoch = step / step_per_epoch
                 dev_loss = evaluate(model, dev)
-                print("Train epoch: {0}\tTrain loss: {1}\tDev loss: {2}".format(
-                    step / step_per_epoch, train_loss.data[0] / step_per_epoch, dev_loss
+                train_loss = train_loss.data[0] / step_per_epoch
+                if train_loss > last_train_loss:
+                    loss_count += 1
+                    if loss_count == 3:
+                        learning_rate *= learning_rate_decay
+                        optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+                        loss_count = 0
+                else:
+                    loss_count = 0
+                last_train_loss = train_loss
+                print("Train epoch: {0}\tLearning rate: {1}, Train loss: {2}\tDev loss: {3}".format(
+                    epoch, learning_rate, train_loss, dev_loss
                     ))
                 train_loss = 0
+                if epoch > checkpoint_after and dev_loss < best_dev_loss:
+                    state_to_save = model.state_dict()
+                    torch.save(state_to_save, model_path)
 
-        state_to_save = model.state_dict()
-        torch.save(state_to_save, model_path)
+            step += 1
 
     enc_dict = dict()
     for idx, line in enumerate(open(os.path.join(data_path, "vocab.q")).readlines()):

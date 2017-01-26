@@ -4,9 +4,9 @@ import random
 src = open(sys.argv[1], 'w')
 dst = open(sys.argv[2], 'w')
 
-for _ in range(1000):
-    # l = random.randint(1, 10)
-    l = 10
+for _ in range(int(sys.argv[3])):
+    l = random.randint(1, 10)
+    # l = 10
     x = [random.randint(0, 9)]
     for _ in range(l-1):
         x.append((x[-1] + 1) % 10)

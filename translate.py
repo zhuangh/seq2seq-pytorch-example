@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import os
+import time
 import random
 
 import torch
@@ -44,6 +45,8 @@ def evaluate(model, dev):
     total_loss = 0
     for _ in xrange(int(len(dev) / 20)):
         encoder_inputs, decoder_inputs, _ = get_batch(dev, 10, 10, 20)
+        if torch.cuda.is_available():
+            encoder_inputs, decoder_inputs = encoder_inputs.cuda(), decoder_inputs.cuda()
         pred = model(encoder_inputs, decoder_inputs, feed_previous=True)
         for time in xrange(len(decoder_inputs) - 1):
             y_pred = pred[time]
@@ -92,15 +95,16 @@ if __name__ == '__main__':
         loss_count = 0
         best_dev_loss = 10
         step = 0
+        begin_time = time.time()
         while True:
             batch_enc_inputs, batch_dec_inputs, batch_weights = get_batch(train, encode_max_len, decode_max_len, batch_size)
             if torch.cuda.is_available():
                 batch_enc_inputs, batch_dec_inputs = batch_enc_inputs.cuda(), batch_dec_inputs.cuda()
             pred = model(batch_enc_inputs, batch_dec_inputs)
             total_loss = None
-            for time in xrange(len(batch_dec_inputs) - 1):
-                y_pred = pred[time]
-                target = batch_dec_inputs[time+1]
+            for time_step in xrange(len(batch_dec_inputs) - 1):
+                y_pred = pred[time_step]
+                target = batch_dec_inputs[time_step+1]
                 loss = criterion(y_pred, target)
                 if total_loss is None:
                     total_loss = loss
@@ -125,8 +129,12 @@ if __name__ == '__main__':
                 else:
                     loss_count = 0
                 last_train_loss = train_loss
-                print("Train epoch: {0}\tLearning rate: {1}, Train loss: {2}\tDev loss: {3}".format(
-                    epoch, learning_rate, train_loss, dev_loss
+                if epoch > 0:
+                    epoch_time = (time.time() - begin_time) / epoch
+                else:
+                    epoch_time = 0
+                print("Epoch time: {0}\tEpoch: {1}\tLR: {2}, Train loss: {3}\tDev loss: {4}".format(
+                    epoch_time, epoch, learning_rate, train_loss, dev_loss
                     ))
                 train_loss = 0
                 if epoch > checkpoint_after and dev_loss < best_dev_loss:

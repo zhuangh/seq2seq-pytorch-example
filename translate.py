@@ -88,7 +88,7 @@ if __name__ == '__main__':
     learning_rate_decay = 0.98
     decay_rate = 0.95
     momentum=0.9
-    data_path = "./tmp"
+    data_path = "./data"
 
     checkpoint_after = 50
 

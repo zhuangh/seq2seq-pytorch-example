@@ -6,7 +6,7 @@ from __future__ import print_function
 import os
 import re
 
-from tree import Tree
+from nltk.tree import Tree
 
 # Special vocabulary symbols - we always put them at the start.
 _PAD = "_PAD"
